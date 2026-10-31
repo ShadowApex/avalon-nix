@@ -55,7 +55,8 @@ stdenv.mkDerivation (finalAttrs: {
 
   buildInputs = [
     openssl
-  ] ++ optionals stdenv.hostPlatform.isLinux [
+  ]
+  ++ optionals stdenv.hostPlatform.isLinux [
     rocmPackages.clr
     rocmPackages.hipblas
     rocmPackages.rocblas
