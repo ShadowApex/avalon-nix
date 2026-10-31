@@ -13,14 +13,27 @@ pinned files, and the compile itself needs no network.
 
 | | Minimum |
 |---|---|
-| GPU | RDNA3 discrete with 20 GB+ of VRAM, offline (upstream measures gfx1100, the RX 7900 XT/XTX) |
-| RAM | 32 GB or more |
+| GPU | RDNA3 with 20 GB+ of VRAM, offline (upstream measures gfx1100, the RX 7900 XT/XTX), or a gfx1151 APU |
+| RAM | 32 GB or more; 64 GB or more on a gfx1151 APU, whose GPU memory is system memory |
 | Disk | ~98 GiB: the 89 GiB of weights plus the build |
 
 `hipArchs` below decides which cards the compiled engine runs on. Upstream builds and measures
-`gfx1100`/`gfx1101`/`gfx1102`; the package accepts any gfx9/gfx10/gfx11 ISA, but everything outside
-that trio is unmeasured and Avalon's own `install.sh` refuses it. Below 20 GB of VRAM the 256k context
-with MTP may not fit - `services.avalon.maxContext = 65536;` is upstream's suggestion.
+`gfx1100`/`gfx1101`/`gfx1102` and its `install.sh` refuses anything else; the default here adds
+`gfx1151` (Ryzen AI MAX / Strix Halo, RDNA3.5), which the fork's own ROCm CI runs. Any
+gfx9/gfx10/gfx11 ISA is accepted, but anything outside those four is unmeasured. Below 20 GB of VRAM
+the 256k context with MTP may not fit - `services.avalon.maxContext = 65536;` is upstream's
+suggestion.
+
+Two things matter on a gfx1151 APU:
+
+- batched inference can return wrong output while kernel launches are asynchronous, so set
+  `services.avalon.launchBlocking = true;` (upstream's gfx1151 CI does the same). It serializes
+  launches and costs throughput, which is why the module leaves it off.
+- the card has no VRAM of its own: it maps system RAM through the GTT, ~50 % of RAM by default. AMD
+  additionally requires kernel 6.18.4 or newer for KFD to set up its queues, and the pinned nixpkgs
+  ships 6.18.59. Increase the mapped pool with
+  `boot.kernelParams = [ "ttm.pages_limit=26214400" ]` (100 GiB in 4 KiB pages) if the GPU side needs
+  more than that half.
 
 The IQ3_KS quant holds a 262144-token context; above that its dequant scales overflow. The MTP draft
 head proposes two tokens per step.
@@ -78,8 +91,9 @@ The first prompt loads the graph and fills the expert cache, which takes minutes
 
   services.avalon = {
     enable = true;
-    # The card's own ISA; the default builds the three desktop RDNA3 ISAs upstream tests.
-    hipArchs = [ "gfx1150" ];
+    # The card's own ISA; the default builds the three desktop RDNA3 ISAs upstream tests plus gfx1151.
+    hipArchs = [ "gfx1151" ];
+    launchBlocking = true;  # correct output on gfx1151; leave off on a discrete card
     openFirewall = false;   # the server binds 127.0.0.1:8080
   };
 }
@@ -100,10 +114,10 @@ services.avalon = {
 };
 ```
 
-Options: `package`, `modelPackage`, `hipArchs`, `maxContext`, `batchSize`, `unifiedBatchSize`,
-`draftBatchSize`, `draftMax`, `cacheQuantK`, `cacheQuantV`, `draftCacheQuant`, `modelFile`, `mtpFile`,
-`host`, `port`, `stateDir`, `user`, `group`, `extraArgs`, `env`, `openFirewall`. Changing `hipArchs`
-rebuilds the engine, which takes a few minutes on a small machine.
+Options: `package`, `modelPackage`, `hipArchs`, `launchBlocking`, `maxContext`, `batchSize`,
+`unifiedBatchSize`, `draftBatchSize`, `draftMax`, `cacheQuantK`, `cacheQuantV`, `draftCacheQuant`,
+`modelFile`, `mtpFile`, `host`, `port`, `stateDir`, `user`, `group`, `extraArgs`, `env`,
+`openFirewall`. Changing `hipArchs` rebuilds the engine.
 
 To check the server answers:
 
@@ -124,8 +138,8 @@ dir, groups, limits and command line; realising it fetches the pinned weights.
 
 The engine builds with ROCm from nixpkgs (`rocmPackages.clang` and `rocmPackages.rocblas`); this tree
 pins nixpkgs-unstable, which ships ROCm 7.2.4 - the version upstream tested. There is no prebuilt
-cache: `nix build .#avalon` compiles HIP kernels for the chosen ISAs, roughly ten minutes on a small
-machine.
+cache: `nix build .#avalon` compiles HIP kernels for each of the chosen ISAs, roughly twenty minutes
+for the default four on a 16-core machine.
 
 To move the engine to a newer Avalon commit, change `revision` (and `shortRev`, which `version` is
 derived from) in `pkgs/by-name/av/avalon/package.nix`; the build reports the new SRI hash on the first

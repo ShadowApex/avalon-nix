@@ -2,10 +2,12 @@
 # GGUF on an AMD card, with the launch flags upstream's install.sh hands the server.
 #
 #   services.avalon.enable = true;
-#   services.avalon.hipArchs = [ "gfx1150" ];   # the card's ISA, which the engine is compiled for
+#   services.avalon.hipArchs = [ "gfx1151" ];   # the card's ISA, which the engine is compiled for
+#   services.avalon.launchBlocking = true;      # needed for correct output on that integrated RDNA3.5
 #
 # The model is ~89 GiB of mmap'd GGUF, so the host wants 32 GB or more of RAM and the card RDNA3 with
-# 20 GB or more of VRAM.
+# 20 GB or more of VRAM. On a gfx1151 APU that VRAM is system memory mapped through the GTT (about half
+# of RAM by default), so such a host wants 64 GB of RAM or more.
 {
   config,
   lib,
@@ -41,10 +43,25 @@ in
         "gfx1100"
         "gfx1101"
         "gfx1102"
+        "gfx1151"
       ];
-      example = [ "gfx1150" ];
+      example = [
+        "gfx1151"
+      ];
       description = "AMD GPU targets the engine is compiled for; every gfx9/gfx10/gfx11 ISA is accepted,
-        and the card's own ISA is what runs best";
+        and the card's own ISA is what runs best. The default is the three desktop RDNA3 ISAs upstream
+        measures, plus gfx1151 (Ryzen AI MAX / Strix Halo, RDNA3.5), which upstream's installer refuses
+        but its own CI runs";
+    };
+
+    launchBlocking = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = "Set {env}`HIP_LAUNCH_BLOCKING=1`, which serializes kernel launches. Integrated
+        RDNA3.5 (gfx1151) can return incorrect output from batched inference with asynchronous
+        launches - upstream's gfx1151 CI runs with it for that reason - so a gfx1151 host wants it on.
+        It costs throughput, so it stays off on discrete cards";
     };
 
     maxContext = lib.mkOption {
@@ -234,7 +251,13 @@ in
           ]
           ++ cfg.extraArgs
         );
-        Environment = lib.mapAttrsToList (name: value: "${name}=${value}") cfg.env;
+        # cfg.env wins, so the workaround can be overridden by hand.
+        Environment = lib.mapAttrsToList (name: value: "${name}=${value}") (
+          lib.optionalAttrs cfg.launchBlocking {
+            HIP_LAUNCH_BLOCKING = "1";
+          }
+          // cfg.env
+        );
         Restart = "on-failure";
         RestartSec = 10;
         # The card is reached through the kernel driver, so /dev/kfd and /dev/dri stay visible (no

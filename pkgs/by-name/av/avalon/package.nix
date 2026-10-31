@@ -5,8 +5,9 @@
 #   pkgs.callPackage ./package.nix { hipArchs = [ "gfx1100" "gfx1201" ]; }
 #
 # The kernels are tuned on a gfx1100 (RX 7900 XT); another RDNA3 target builds with the source's own
-# warning. The build needs no network: the UI is disabled rather than downloaded, and the fork vendors
-# its httplib.
+# warning. The default set adds gfx1151 (Ryzen AI MAX / Strix Halo, RDNA3.5): upstream's install.sh
+# refuses APUs, but the fork's own ROCm CI runs gfx1151. The build needs no network: the UI is
+# disabled rather than downloaded, and the fork vendors its httplib.
 
 {
   lib,
@@ -21,6 +22,7 @@
     "gfx1100"
     "gfx1101"
     "gfx1102"
+    "gfx1151"
   ],
 }:
 

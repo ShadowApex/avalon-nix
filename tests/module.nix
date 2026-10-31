@@ -23,7 +23,8 @@ in
       users.users.root.initialPassword = "test";
       services.avalon = {
         enable = true;
-        hipArchs = [ "gfx1150" ];
+        hipArchs = [ "gfx1151" ];
+        launchBlocking = true;
         openFirewall = true;
         env.AMD_P2U_WAIT_ENABLE = "1";
         extraArgs = [ "--no-tempcache" ];
