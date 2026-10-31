@@ -198,7 +198,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     homepage = "https://huggingface.co/freriadoc/Qwen3.8-Flash-Next-Avalon-GGUF";
     license = lib.licenses.unfreeRedistributable;
     sourceProvenance = with lib.sourceTypes; [ binaryNativeCode ];
-    platforms = lib.platforms.linux;
+    platforms = [ "x86_64-linux" ];
     unrestricted = true;
   };
 })

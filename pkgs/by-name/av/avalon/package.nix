@@ -93,6 +93,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://github.com/freriadoc/Avalon";
     license = lib.licenses.mit;
     mainProgram = "llama-server";
-    platforms = lib.platforms.linux;
+    platforms = [ "x86_64-linux" ];
   };
 })

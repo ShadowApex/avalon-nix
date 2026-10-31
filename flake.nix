@@ -6,31 +6,20 @@
   outputs =
     inputs@{ nixpkgs, ... }:
     let
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-      ];
-      # The model and the draft head are unfree redistributable weights, so the flake's own package set
-      # enables allowUnfree; consumers that only take the engine are unaffected.
-      pkgsFor =
-        system:
-        import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-          overlays = [ (import ./overlays/default.nix) ];
-        };
+      # ROCm from nixpkgs and the AMD cards this targets are x86_64-linux. The model and the draft head
+      # are unfree redistributable weights, so this package set enables allowUnfree; consumers that only
+      # take the engine are unaffected.
+      pkgs = import nixpkgs {
+        system = "x86_64-linux";
+        config.allowUnfree = true;
+        overlays = [ (import ./overlays/default.nix) ];
+      };
     in
     {
-      packages = nixpkgs.lib.genAttrs systems (
-        system:
-        let
-          pkgs = pkgsFor system;
-        in
-        {
-          inherit (pkgs) avalon avalon-mtp avalon-model;
-          default = pkgs.avalon;
-        }
-      );
+      packages.x86_64-linux = {
+        inherit (pkgs) avalon avalon-mtp avalon-model;
+        default = pkgs.avalon;
+      };
 
       nixosModules.avalon = ./modules/services/avalon.nix;
 
