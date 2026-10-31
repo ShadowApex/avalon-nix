@@ -1,0 +1,5 @@
+# the symlink a plain `nix build` leaves in the flake directory
+result
+
+# harness state
+.pi/
