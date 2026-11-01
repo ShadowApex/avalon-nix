@@ -266,19 +266,12 @@ in
           "render"
           "video"
         ];
-        # DeviceAllow entries are device node paths or char-/block- group names from /proc/devices,
-        # never directories: /dev/dri resolves to nothing and is dropped, and the device cgroup then
-        # denies the render nodes ROCm pairs with KFD agents through - hip reports "no ROCm-capable
-        # device". char-drm covers all of /dev/dri; the groups above are only DAC.
-        DeviceAllow = [
-          "char-kfd rwm"
-          "char-drm rwm"
-        ];
         # ROCm pins the resident experts, and wants an unlimited memlock for that
         LimitMEMLOCK = "infinity";
         NoNewPrivileges = true;
         ProtectSystem = "strict";
         ProtectHome = true;
+        PrivateTmp = true;
         ReadWritePaths = [ cfg.stateDir ];
       };
     };
