@@ -2,7 +2,8 @@
 #
 #   nix build --impure -f tests/module.nix --no-link --print-out-paths
 #
-# Realising the toplevel fetches the pinned weights, ~91 GiB, and starts nothing.
+# Realising the toplevel fetches the pinned weights - ~91 GiB, plus the 907 MB image encoder this test turns
+# on - and starts nothing.
 let
   src = <nixpkgs>;
   pkgs = import src {
@@ -25,6 +26,7 @@ in
         enable = true;
         hipArchs = [ "gfx1151" ];
         launchBlocking = true;
+        vision.enable = true;
         openFirewall = true;
         env.AMD_P2U_WAIT_ENABLE = "1";
         extraArgs = [ "--no-tempcache" ];

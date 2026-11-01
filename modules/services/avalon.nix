@@ -4,6 +4,7 @@
 #   services.avalon.enable = true;
 #   services.avalon.hipArchs = [ "gfx1151" ];   # the card's ISA, which the engine is compiled for
 #   services.avalon.launchBlocking = true;      # needed for correct output on that integrated RDNA3.5
+#   services.avalon.vision.enable = true;       # images as well as text, with the shared Flash-Next projector
 #
 # The model is ~89 GiB of mmap'd GGUF, so the host wants 32 GB or more of RAM and the card RDNA3 with
 # 20 GB or more of VRAM. On a gfx1151 APU that VRAM is system memory mapped through the GTT (about half
@@ -18,6 +19,7 @@ let
   cfg = config.services.avalon;
   modelName = "Qwen3.8-Flash-Next-Avalon-IQ3KS-00001-of-00033.gguf";
   mtpName = "mtp-Qwen3.8-Flash-Next-shared-IQ3K-IQ4NL-FR65k.gguf";
+  mmprojName = "mmproj-Qwen3.8-Flash-Next-BF16.gguf";
 in
 {
   options.services.avalon = {
@@ -124,6 +126,39 @@ in
       type = lib.types.str;
       default = mtpName;
       description = "The draft head within {option}`services.avalon.modelPackage`'s MTP/ directory";
+    };
+
+    vision.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = "Accept images as well as text, by giving the server {option}`services.avalon.vision.package` with `-mm`. The engine builds llama.cpp's mtmd library either way, so this costs no rebuild - only the encoder file and the flag";
+    };
+
+    vision.package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.avalon-mmproj;
+      description = "The multimodal projector: the vision tower the Qwen3.8-Flash-Next line shares, 907 MB. It comes from ISTA's quantization, not from Avalon's, which publishes no projector";
+    };
+
+    vision.file = lib.mkOption {
+      type = lib.types.str;
+      default = mmprojName;
+      description = "The projector within {option}`services.avalon.vision.package`";
+    };
+
+    vision.maxTokens = lib.mkOption {
+      type = lib.types.nullOr lib.types.int;
+      default = null;
+      example = 576;
+      description = "Image tokens per picture (--image-max-tokens); the file decides when null. The encoder works at 768x768 with 16-pixel patches and a 2x2 merge, so a full-resolution picture is 576 tokens";
+    };
+
+    vision.offload = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = "Encode on the GPU (add {option}`--no-mmproj-offload` to the server when false). The tower wants ~0.9 GiB of VRAM on top of the context and the expert cache, so a 20 GB card may want it off; that encodes on the CPU, which is slower per picture";
     };
 
     host = lib.mkOption {
@@ -249,6 +284,19 @@ in
             "--port"
             (toString cfg.port)
           ]
+          ++ lib.optionals cfg.vision.enable (
+            [
+              "-mm"
+              "${cfg.vision.package}/${cfg.vision.file}"
+            ]
+            ++ lib.optionals (cfg.vision.maxTokens != null) [
+              "--image-max-tokens"
+              (toString cfg.vision.maxTokens)
+            ]
+            ++ lib.optionals (!cfg.vision.offload) [
+              "--no-mmproj-offload"
+            ]
+          )
           ++ cfg.extraArgs
         );
         # cfg.env wins, so the workaround can be overridden by hand.

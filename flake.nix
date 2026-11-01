@@ -17,7 +17,12 @@
     in
     {
       packages.x86_64-linux = {
-        inherit (pkgs) avalon avalon-mtp avalon-model;
+        inherit (pkgs)
+          avalon
+          avalon-mtp
+          avalon-mmproj
+          avalon-model
+          ;
         default = pkgs.avalon;
       };
 

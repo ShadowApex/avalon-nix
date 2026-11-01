@@ -3,11 +3,11 @@
 [Avalon](https://github.com/freriadoc/Avalon) is a llama.cpp fork that serves
 `Qwen3.8-Flash-Next-Avalon-GGUF` on a single AMD card: the full model is memory-mapped from RAM and
 only a subset of its experts is resident on the GPU. This flake packages it for NixOS - the HIP
-engine, the quantized weights, the MTP draft head, and a service unit.
+engine, the quantized weights, the MTP draft head, the image encoder, and a service unit.
 
 Everything is pinned: the engine to the commit `2d16e18` of the fork, the weights to the Hugging Face
-revision `372fe3a4`, each file with its own hash. Nothing is downloaded at build time except those
-pinned files, and the compile itself needs no network.
+revision `372fe3a4`, the image encoder to `ed59f92`, each file with its own hash. Nothing is downloaded
+at build time except those pinned files, and the compile itself needs no network.
 
 ## Hardware
 
@@ -43,6 +43,7 @@ head proposes two tokens per step.
 ```console
 $ nix build .#avalon          # the engine: llama-server and its CLI tools
 $ nix build .#avalon-mtp      # the shared MTP draft head, 1.4 GiB
+$ nix build .#avalon-mmproj   # the shared image encoder, 907 MB
 $ nix build .#avalon-model    # the quantized model, 89 GiB, with the draft head in MTP/
 ```
 
@@ -56,7 +57,12 @@ $ ./result/Qwen3.8-Flash-Next-Avalon-IQ3KS-00001-of-00033.gguf   # the file pass
 $ ./result/MTP/                                                  # the draft head passed to -md
 ```
 
-Both weight packages carry `meta.unfree = true`: they are redistributable, not free. Building them
+`avalon-mmproj` stays out of `avalon-model` by default - it is a separate download, and text-only hosts
+have no use for it. `pkgs.avalon-model.override { mmprojPackage = pkgs.avalon-mmproj; }` links it into the
+model directory as `vision/` for a host that wants one path; the service takes the projector on its own
+either way.
+
+All three weight packages carry `meta.unfree = true`: they are redistributable, not free. Building them
 needs `allowUnfree`, which the flake's own package set already enables, so `nix build .#avalon-model`
 works as-is. With the overlay (`overlays.default`) into your own nixpkgs, set
 `nixpkgs.config.allowUnfree = true` yourself.
@@ -80,6 +86,71 @@ $ nix shell .#avalon .#avalon-model --command llama-server \
 The first prompt loads the graph and fills the expert cache, which takes minutes on a small card -
 `llama-server` prints nothing until it is ready. Server-side tools (`llama-bench`,
 `llama-batched-bench`, `llama-fit-params`) are in the same output.
+
+## Images
+
+The engine builds llama.cpp's mtmd library already - `tools/server` links it, and this flake builds the
+tools tree - so pictures are a weight and a flag rather than a rebuild: `-mm PROJECTOR`. Avalon's own
+repository publishes no projector, so `avalon-mmproj` pins the one the whole Qwen3.8-Flash-Next line
+shares, from ISTA's GSQ-RCO quantization - the file Strata serves images with. The Avalon quant keeps
+ISTA's experts and requantizes only the up/gate tensors of the language model, so the tower and its merger
+still fit it: the projector emits 2560-wide rows, which is the embedding length of the `qwen4exp`
+architecture the model declares, and the model's own chat template renders `image_url` parts into
+`vision_start`/`vision_end`.
+
+```console
+$ nix build .#avalon-mmproj   # 449M-parameter vision tower, BF16, 907 MB
+```
+
+Without NixOS, add the flag to the line from the section above:
+
+```console
+$ MM=$(nix build --no-link --print-out-paths .#avalon-mmproj)
+$ nix shell .#avalon .#avalon-model --command llama-server \
+    -m ./result/Qwen3.8-Flash-Next-Avalon-IQ3KS-00001-of-00033.gguf \
+    -mm "$MM/mmproj-Qwen3.8-Flash-Next-BF16.gguf" \
+    -c 262144 -b 9536 -ub 9536 -fa on -ctk q8_0 -ctv q4_0 --jinja --parallel 1 \
+    -md ./result/MTP/mtp-Qwen3.8-Flash-Next-shared-IQ3K-IQ4NL-FR65k.gguf \
+    --spec-type draft-mtp --spec-draft-n-max 2 \
+    -ubd 256 -ctkd q8_0 -ctvd q8_0 \
+    --host 127.0.0.1 --port 8080
+```
+
+```console
+$ curl -s http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/json' \
+    -d "{\"messages\":[{\"role\":\"user\",\"content\":[" \
+       "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,$(base64 -w0 pic.png)\"}}," \
+       "{\"type\":\"text\",\"text\":\"What is in this picture?\"}]}]}"
+```
+
+On NixOS:
+
+```nix
+services.avalon.vision.enable = true;   # adds -mm, and the projector, to the unit
+```
+
+Options: `vision.enable`, `vision.package`, `vision.file`, `vision.maxTokens`, `vision.offload`.
+
+Four things to know:
+
+- The tower is BF16, so encoding on the card wants ~0.9 GiB of VRAM on top of the 19.7 GiB the 256k
+  context already holds with MTP and the expert cache. On a 20 GB card use `vision.offload = false` - the
+  encoder then runs on the CPU, slower per picture - or `services.avalon.maxContext = 65536;`.
+- The encoder works at 768x768 with 16-pixel patches and a 2x2 merge, so a full-resolution picture is 576
+  tokens. `vision.maxTokens` caps that (`--image-max-tokens`); left null, the file's own value is used.
+- Avalon has never measured MTP with pictures, and nothing in the server forbids the combination. If a
+  multimodal answer comes back wrong, drop the drafter: `services.avalon.extraArgs = [ "--spec-type"
+  "none" ];`. `extraArgs` is appended, so it overrides the module's `--spec-type draft-mtp`.
+- The web UI is not built (`LLAMA_BUILD_UI` is off), so there is no drag-and-drop box; pictures arrive
+  through the OpenAI-compatible endpoint.
+
+webp pictures and video are decoded by running `ffmpeg`, which the unit does not carry: png and jpeg are
+decoded in process and need nothing. To accept webp, put it on the unit's `PATH` - `env` takes precedence
+over the module's own environment:
+
+```nix
+services.avalon.env.PATH = "${pkgs.ffmpeg}/bin:/run/current-system/sw/bin";
+```
 
 ## NixOS
 
@@ -116,8 +187,9 @@ services.avalon = {
 
 Options: `package`, `modelPackage`, `hipArchs`, `launchBlocking`, `maxContext`, `batchSize`,
 `unifiedBatchSize`, `draftBatchSize`, `draftMax`, `cacheQuantK`, `cacheQuantV`, `draftCacheQuant`,
-`modelFile`, `mtpFile`, `host`, `port`, `stateDir`, `user`, `group`, `extraArgs`, `env`,
-`openFirewall`. Changing `hipArchs` rebuilds the engine.
+`modelFile`, `mtpFile`, the `vision.*` set described under [Images](#images), `host`, `port`, `stateDir`,
+`user`, `group`, `extraArgs`, `env`, `openFirewall`. Changing `hipArchs` rebuilds the engine; turning
+`vision.enable` on does not.
 
 To check the server answers:
 
@@ -144,9 +216,12 @@ for the default four on a 16-core machine.
 To move the engine to a newer Avalon commit, change `revision` (and `shortRev`, which `version` is
 derived from) in `pkgs/by-name/av/avalon/package.nix`; the build reports the new SRI hash on the first
 attempt. To move the weights, change `revision` in `pkgs/by-name/av/avalon-model/package.nix` and
-re-pin the files whose hashes the build reports.
+re-pin the files whose hashes the build reports. To move the image encoder, change `revision` in
+`pkgs/by-name/av/avalon-mmproj/package.nix`; its file name is the default of
+`services.avalon.vision.file`, so a rename means changing both.
 
 ## License
 
-MIT for the engine (as upstream); Apache 2.0 for the quantized weights. The weights are redistributable
-but not free, so they are marked `unfree` in the package metadata.
+MIT for the engine (as upstream); Apache 2.0 for the quantized weights. The image encoder carries the Qwen
+community license its own file declares. The weights are redistributable but not free, so they are marked
+`unfree` in the package metadata.

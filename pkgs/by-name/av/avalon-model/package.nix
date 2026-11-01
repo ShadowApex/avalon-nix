@@ -1,6 +1,9 @@
 # Avalon's model payload: the IQ3_KS hybrid shards of Qwen3.8-Flash-Next, the expert ranking the cache
 # prefills from (the server reads moe-cache-ranking.bin next to the model), and the license.
 #
+# Pass mmprojPackage (pkgs.avalon-mmproj) to get a fourth directory, vision/, holding the image encoder; the
+# overlay leaves it out so the text-only build stays 89 GiB, and the service takes the projector on its own.
+#
 # The GGUF files carry the Qwen Community License, so this package is unfree and needs
 # nixpkgs.config.allowUnfree = true in the consuming configuration.
 #
@@ -14,10 +17,12 @@
   stdenvNoCC,
   fetchurl,
   mtpPackage ? null,
+  mmprojPackage ? null,
 }:
 
 let
   revision = "372fe3a4e572c5ba75a90e579de0695633d083a8"; # HF main, 2026-10-23
+  mmprojName = "mmproj-Qwen3.8-Flash-Next-BF16.gguf";
   baseUrl = "https://huggingface.co/freriadoc/Qwen3.8-Flash-Next-Avalon-GGUF/resolve/${revision}";
 
   files = [
@@ -189,6 +194,10 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     ++ lib.optionals (mtpPackage != null) [
       "mkdir -p $out/MTP"
       "ln -s ${mtpPackage}/mtp-Qwen3.8-Flash-Next-shared-IQ3K-IQ4NL-FR65k.gguf $out/MTP/"
+    ]
+    ++ lib.optionals (mmprojPackage != null) [
+      "mkdir -p $out/vision"
+      "ln -s ${mmprojPackage}/${mmprojName} $out/vision/"
     ]
   )
   + "\nrunHook postInstall\n";
