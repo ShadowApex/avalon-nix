@@ -29,7 +29,7 @@ in
         vision.enable = true;
         openFirewall = true;
         env.AMD_P2U_WAIT_ENABLE = "1";
-        extraArgs = [ "--no-tempcache" ];
+        extraArgs = [ "--moe-cache-cpu-overlap" "2" ];
       };
     }
   ];

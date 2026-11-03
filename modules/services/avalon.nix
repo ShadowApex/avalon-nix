@@ -6,8 +6,9 @@
 #   services.avalon.launchBlocking = true;      # needed for correct output on that integrated RDNA3.5
 #   services.avalon.vision.enable = true;       # images as well as text, with the shared Flash-Next projector
 #
-# The model is ~89 GiB of mmap'd GGUF, so the host wants 32 GB or more of RAM and the card RDNA3 with
-# 20 GB or more of VRAM. On a gfx1151 APU that VRAM is system memory mapped through the GTT (about half
+# The model is ~89 GiB of mmap'd GGUF, so the host wants 32 GB or more of RAM - upstream runs with 16,
+# reading the experts that do not fit again from the disk - and the card RDNA3 or RDNA4 with 20 GB or
+# more of VRAM. On a gfx1151 APU that VRAM is system memory mapped through the GTT (about half
 # of RAM by default), so such a host wants 64 GB of RAM or more.
 {
   config,
@@ -50,10 +51,12 @@ in
       example = [
         "gfx1151"
       ];
-      description = "AMD GPU targets the engine is compiled for; every gfx9/gfx10/gfx11 ISA is accepted,
-        and the card's own ISA is what runs best. The default is the three desktop RDNA3 ISAs upstream
-        measures, plus gfx1151 (Ryzen AI MAX / Strix Halo, RDNA3.5), which upstream's installer refuses
-        but its own CI runs";
+      description = "AMD GPU targets the engine is compiled for; every gfx9/gfx10/gfx11/gfx12 ISA is
+        accepted, and the card's own ISA is what runs best. The default is the three desktop RDNA3 ISAs
+        upstream measures, plus gfx1151 (Ryzen AI MAX / Strix Halo, RDNA3.5), which upstream's installer
+        refuses but its own CI runs. RDNA4 (gfx1201/gfx1200), accepted by upstream's installer and
+        reported working by a user, is left out for the same reason: unmeasured, and without the
+        RDNA3-only chunked prompt GDN kernel - an RDNA4 host asks for its own ISA";
     };
 
     launchBlocking = lib.mkOption {
@@ -196,9 +199,8 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [
-        "--no-jinja"
-        "--flash-attn"
-        "hybrid"
+        "--moe-cache-cpu-overlap"
+        "2"
       ];
       description = "Appended to the command line after the upstream flags";
     };

@@ -6,7 +6,9 @@
 #
 # The kernels are tuned on a gfx1100 (RX 7900 XT); another RDNA3 target builds with the source's own
 # warning. The default set adds gfx1151 (Ryzen AI MAX / Strix Halo, RDNA3.5): upstream's install.sh
-# refuses APUs, but the fork's own ROCm CI runs gfx1151. The build needs no network: the UI is
+# refuses APUs, but the fork's own ROCm CI runs gfx1151. RDNA4 (gfx1201 / gfx1200) is accepted by
+# install.sh and reported working, but unmeasured upstream and without the RDNA3-only chunked prompt GDN
+# kernel, so it is left out of the default set. The build needs no network: the UI is
 # disabled rather than downloaded, and the fork vendors its httplib.
 
 {
@@ -33,9 +35,9 @@ let
     optionals
     ;
 
-  # The repository has no tags: pinned to the commit of 2026-10-31, whose CMakeLists.txt reports
-  # 0.6.0-dev. A bump means re-pinning the unpacked archive's hash.
-  version = "0.6.0-dev";
+  # The repository has no tags: pinned to the commit of 2026-11-03, whose CMakeLists.txt reports
+  # 0.8.0-dev. A bump means re-pinning the unpacked archive's hash.
+  version = "0.8.0-dev";
 in
 
 stdenv.mkDerivation (finalAttrs: {
@@ -45,8 +47,8 @@ stdenv.mkDerivation (finalAttrs: {
   src = fetchFromGitHub {
     owner = "freriadoc";
     repo = "Avalon";
-    rev = "2d16e18cc6c65eea0401ca9610ea66f282a55ea0";
-    hash = "sha256-0QwcyBmbnLuxksa/gENzLQ6c0EDFMTXtA1H3t7Gk0hY=";
+    rev = "6efa9db045abb07ca61b112e733a7da7a5549380";
+    hash = "sha256-QYIWonoM2tXOn0BQWvo/Ekzm+3q7N8CaU96W94ZCKJE=";
   };
 
   nativeBuildInputs = [

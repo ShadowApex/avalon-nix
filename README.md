@@ -5,7 +5,7 @@
 only a subset of its experts is resident on the GPU. This flake packages it for NixOS - the HIP
 engine, the quantized weights, the MTP draft head, the image encoder, and a service unit.
 
-Everything is pinned: the engine to the commit `2d16e18` of the fork, the weights to the Hugging Face
+Everything is pinned: the engine to the commit `6efa9db` of the fork, the weights to the Hugging Face
 revision `372fe3a4`, the image encoder to `ed59f92`, each file with its own hash. Nothing is downloaded
 at build time except those pinned files, and the compile itself needs no network.
 
@@ -13,16 +13,18 @@ at build time except those pinned files, and the compile itself needs no network
 
 | | Minimum |
 |---|---|
-| GPU | RDNA3 with 20 GB+ of VRAM, offline (upstream measures gfx1100, the RX 7900 XT/XTX), or a gfx1151 APU |
-| RAM | 32 GB or more; 64 GB or more on a gfx1151 APU, whose GPU memory is system memory |
+| GPU | RDNA3 with 20 GB+ of VRAM, offline (upstream measures gfx1100, the RX 7900 XT/XTX), a gfx1151 APU, or RDNA4 (upstream's installer takes it, one user reports it working, unmeasured) |
+| RAM | 16 GB is upstream's floor now (generation stays close, new long prompts are read again from disk); 32 GB or more is the comfortable line, 64 GB or more on a gfx1151 APU, whose GPU memory is system memory |
 | Disk | ~98 GiB: the 89 GiB of weights plus the build |
 
 `hipArchs` below decides which cards the compiled engine runs on. Upstream builds and measures
-`gfx1100`/`gfx1101`/`gfx1102` and its `install.sh` refuses anything else; the default here adds
+`gfx1100`/`gfx1101`/`gfx1102`; its `install.sh` also takes RDNA4 (`gfx1201`/`gfx1200`) past a warning -
+a user reported 86.6 t/s on a Radeon AI PRO R9700 - and refuses APUs, while the default here adds
 `gfx1151` (Ryzen AI MAX / Strix Halo, RDNA3.5), which the fork's own ROCm CI runs. Any
-gfx9/gfx10/gfx11 ISA is accepted, but anything outside those four is unmeasured. Below 20 GB of VRAM
-the 256k context with MTP may not fit - `services.avalon.maxContext = 65536;` is upstream's
-suggestion.
+gfx9/gfx10/gfx11/gfx12 ISA is accepted, but anything outside the default four is unmeasured, and the
+chunked prompt GDN kernel is RDNA3-only, so an RDNA4 host asks for its own ISA with
+`services.avalon.hipArchs = [ "gfx1201" ];`. Below 20 GB of VRAM the 256k context with MTP may not
+fit - `services.avalon.maxContext = 65536;` is upstream's suggestion.
 
 Two things matter on a gfx1151 APU:
 
@@ -177,10 +179,11 @@ and no start timeout. Its command line is the launcher flags above; `extraArgs` 
 
 ```nix
 services.avalon = {
-  extraArgs = [ "--no-tempcache" ];
+  extraArgs = [ "--moe-cache-cpu-overlap" "2" ];   # a share of the cached experts computed on the CPU
   env = {
     AMD_P2U_WAIT_ENABLE = "1";
     HIPBLASLT_HEURISTICS_CACHE_CAPACITY = "3000";
+    LLAMA_QSA_TILES = "0";   # back to the per-slice QSA attention of the older engine
   };
 };
 ```
@@ -213,9 +216,12 @@ pins nixpkgs-unstable, which ships ROCm 7.2.4 - the version upstream tested. The
 cache: `nix build .#avalon` compiles HIP kernels for each of the chosen ISAs, roughly twenty minutes
 for the default four on a 16-core machine.
 
-To move the engine to a newer Avalon commit, change `revision` (and `shortRev`, which `version` is
-derived from) in `pkgs/by-name/av/avalon/package.nix`; the build reports the new SRI hash on the first
-attempt. To move the weights, change `revision` in `pkgs/by-name/av/avalon-model/package.nix` and
+To move the engine to a newer Avalon commit, change `rev` in `pkgs/by-name/av/avalon/package.nix` and
+set `version` to what that commit's `CMakeLists.txt` reports for `LLAMA_VERSION` (`0.8.0-dev` at the
+commit pinned here); the build reports the new SRI hash on the first attempt, or
+`nix-prefetch-url --unpack <archive url>` gives it without a build. Read the commits since the pin for
+changes to the build and to the launcher's flags before bumping. To move the weights, change
+`revision` in `pkgs/by-name/av/avalon-model/package.nix` and
 re-pin the files whose hashes the build reports. To move the image encoder, change `revision` in
 `pkgs/by-name/av/avalon-mmproj/package.nix`; its file name is the default of
 `services.avalon.vision.file`, so a rename means changing both.
